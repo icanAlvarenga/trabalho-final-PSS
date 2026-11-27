@@ -3,11 +3,12 @@ package br.com.burgerexpress.catalogo.service;
 import br.com.burgerexpress.catalogo.dto.CategoriaRequest;
 import br.com.burgerexpress.catalogo.dto.CategoriaResponse;
 import br.com.burgerexpress.catalogo.entity.Categoria;
-import br.com.burgerexpress.catalogo.service.CategoriaMapper;
 import br.com.burgerexpress.catalogo.repository.CategoriaRepository;
 import br.com.burgerexpress.shared.exception.ConflitoException;
 import br.com.burgerexpress.shared.exception.RecursoNaoEncontradoException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,9 +25,12 @@ public class CategoriaService {
 
     @Transactional(readOnly = true)
     public List<CategoriaResponse> listarTodas() {
-        return categoriaRepository.findAll().stream()
-                .map(categoriaMapper::paraResponse)
-                .toList();
+        List<Categoria> categorias = categoriaRepository.findAll();
+        List<CategoriaResponse> respostas = new ArrayList<>();
+        for (Categoria categoria : categorias) {
+            respostas.add(categoriaMapper.paraResponse(categoria));
+        }
+        return respostas;
     }
 
     @Transactional(readOnly = true)
@@ -71,7 +75,10 @@ public class CategoriaService {
     }
 
     private Categoria buscarEntidade(Long id) {
-        return categoriaRepository.findById(id)
-                .orElseThrow(() -> new RecursoNaoEncontradoException("Categoria não encontrada com id: " + id));
+        Optional<Categoria> encontrada = categoriaRepository.findById(id);
+        if (encontrada.isEmpty()) {
+            throw new RecursoNaoEncontradoException("Categoria não encontrada com id: " + id);
+        }
+        return encontrada.get();
     }
 }

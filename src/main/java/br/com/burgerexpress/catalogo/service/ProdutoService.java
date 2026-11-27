@@ -6,14 +6,15 @@ import br.com.burgerexpress.catalogo.dto.ProdutoResponse;
 import br.com.burgerexpress.catalogo.dto.ProdutoResumo;
 import br.com.burgerexpress.catalogo.entity.Categoria;
 import br.com.burgerexpress.catalogo.entity.Produto;
-import br.com.burgerexpress.catalogo.service.ProdutoMapper;
-import br.com.burgerexpress.catalogo.service.regra.RegraBaixaEstoque;
 import br.com.burgerexpress.catalogo.repository.CategoriaRepository;
 import br.com.burgerexpress.catalogo.repository.ProdutoRepository;
+import br.com.burgerexpress.catalogo.service.regra.RegraReservaEstoque;
 import br.com.burgerexpress.shared.exception.ConflitoException;
 import br.com.burgerexpress.shared.exception.DadosInvalidosException;
 import br.com.burgerexpress.shared.exception.RecursoNaoEncontradoException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,17 +24,17 @@ public class ProdutoService {
     private final ProdutoRepository produtoRepository;
     private final CategoriaRepository categoriaRepository;
     private final ProdutoMapper produtoMapper;
-    private final List<RegraBaixaEstoque> regrasBaixaEstoque;
+    private final List<RegraReservaEstoque> regrasReservaEstoque;
 
     public ProdutoService(
             ProdutoRepository produtoRepository,
             CategoriaRepository categoriaRepository,
             ProdutoMapper produtoMapper,
-            List<RegraBaixaEstoque> regrasBaixaEstoque) {
+            List<RegraReservaEstoque> regrasReservaEstoque) {
         this.produtoRepository = produtoRepository;
         this.categoriaRepository = categoriaRepository;
         this.produtoMapper = produtoMapper;
-        this.regrasBaixaEstoque = regrasBaixaEstoque;
+        this.regrasReservaEstoque = regrasReservaEstoque;
     }
 
     @Transactional(readOnly = true)
@@ -50,9 +51,11 @@ public class ProdutoService {
             produtos = produtoRepository.findAll();
         }
 
-        return produtos.stream()
-                .map(produtoMapper::paraResponse)
-                .toList();
+        List<ProdutoResponse> respostas = new ArrayList<>();
+        for (Produto produto : produtos) {
+            respostas.add(produtoMapper.paraResponse(produto));
+        }
+        return respostas;
     }
 
     @Transactional(readOnly = true)
@@ -60,9 +63,19 @@ public class ProdutoService {
         return produtoMapper.paraResponse(buscarEntidade(id));
     }
 
+    /** Contrato público para outros módulos (ex.: Pedidos) consultarem produto ativo e disponível. */
     @Transactional(readOnly = true)
-    public ProdutoResumo buscarResumo(Long id) {
-        return produtoMapper.paraResumo(buscarEntidade(id));
+    public ProdutoResumo buscarProdutoDisponivel(Long produtoId) {
+        Produto produto = buscarEntidade(produtoId);
+        if (!produto.getCategoria().isAtiva()) {
+            throw new ConflitoException(
+                    "A categoria do produto '" + produto.getNome() + "' está inativa.");
+        }
+        if (!produto.isDisponivel()) {
+            throw new ConflitoException(
+                    "O produto '" + produto.getNome() + "' está indisponível.");
+        }
+        return produtoMapper.paraResumo(produto);
     }
 
     @Transactional
@@ -107,22 +120,24 @@ public class ProdutoService {
         return produtoMapper.paraResponse(produtoRepository.save(produto));
     }
 
+    /** Contrato público para reserva de estoque (chamado ao criar pedido). */
     @Transactional
-    public ProdutoResumo baixarEstoque(Long id, int quantidade) {
-        Produto produto = buscarEntidade(id);
-        for (RegraBaixaEstoque regra : regrasBaixaEstoque) {
+    public ProdutoResumo reservarEstoque(Long produtoId, Integer quantidade) {
+        Produto produto = buscarEntidade(produtoId);
+        for (RegraReservaEstoque regra : regrasReservaEstoque) {
             regra.validar(produto, quantidade);
         }
         produto.baixarEstoque(quantidade);
         return produtoMapper.paraResumo(produtoRepository.save(produto));
     }
 
+    /** Contrato público para devolução de estoque (chamado ao cancelar pedido). */
     @Transactional
-    public ProdutoResumo reporEstoque(Long id, int quantidade) {
-        if (quantidade <= 0) {
-            throw new DadosInvalidosException("A quantidade para reposição de estoque deve ser maior que zero.");
+    public ProdutoResumo devolverEstoque(Long produtoId, Integer quantidade) {
+        if (quantidade == null || quantidade <= 0) {
+            throw new DadosInvalidosException("A quantidade para devolução de estoque deve ser maior que zero.");
         }
-        Produto produto = buscarEntidade(id);
+        Produto produto = buscarEntidade(produtoId);
         produto.reporEstoque(quantidade);
         return produtoMapper.paraResumo(produtoRepository.save(produto));
     }
@@ -134,17 +149,21 @@ public class ProdutoService {
     }
 
     private Produto buscarEntidade(Long id) {
-        return produtoRepository.findById(id)
-                .orElseThrow(() -> new RecursoNaoEncontradoException("Produto não encontrado com id: " + id));
+        Optional<Produto> encontrado = produtoRepository.findById(id);
+        if (encontrado.isEmpty()) {
+            throw new RecursoNaoEncontradoException("Produto não encontrado com id: " + id);
+        }
+        return encontrado.get();
     }
 
     private Categoria buscarCategoriaAtiva(Long categoriaId) {
-        Categoria categoria = categoriaRepository.findById(categoriaId)
-                .orElseThrow(() -> new RecursoNaoEncontradoException(
-                        "Categoria não encontrada com id: " + categoriaId));
-
+        Optional<Categoria> encontrada = categoriaRepository.findById(categoriaId);
+        if (encontrada.isEmpty()) {
+            throw new RecursoNaoEncontradoException("Categoria não encontrada com id: " + categoriaId);
+        }
+        Categoria categoria = encontrada.get();
         if (!categoria.isAtiva()) {
-            throw new DadosInvalidosException("Não é possível vincular produto a uma categoria inativa.");
+            throw new ConflitoException("Não é possível vincular produto a uma categoria inativa.");
         }
         return categoria;
     }

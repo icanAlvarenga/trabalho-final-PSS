@@ -2,15 +2,17 @@ package br.com.burgerexpress.catalogo.service.regra;
 
 import br.com.burgerexpress.catalogo.entity.Produto;
 import br.com.burgerexpress.shared.exception.DadosInvalidosException;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 @Component
-public class RegraQuantidadePositiva implements RegraBaixaEstoque {
+@Order(1)
+public class RegraQuantidadePositiva implements RegraReservaEstoque {
 
     @Override
-    public void validar(Produto produto, int quantidade) {
-        if (quantidade <= 0) {
-            throw new DadosInvalidosException("A quantidade para baixa de estoque deve ser maior que zero.");
+    public void validar(Produto produto, Integer quantidade) {
+        if (quantidade == null || quantidade <= 0) {
+            throw new DadosInvalidosException("A quantidade para reserva de estoque deve ser maior que zero.");
         }
     }
 }
